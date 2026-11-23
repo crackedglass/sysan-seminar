@@ -214,6 +214,15 @@
   body.review .matrix tr.current td{opacity:1;background:rgba(45,212,238,.12)}
   body.review .matrix tr.current td:first-child{box-shadow:inset 3px 0 var(--c-accent-2)}
   body.review .matrix tr.current .rid{color:var(--c-accent-2)}
+  .panel,.panel>.box{min-width:0}
+  .matrix-scroll{max-width:100%;overflow-x:auto}
+  .matrix{min-width:650px}
+  .matrix tbody th{border-top:1px solid var(--c-line);text-transform:none;letter-spacing:normal;color:var(--c-text);font-size:12px;padding:8px}
+  .matrix tbody .rid{display:block}
+  .matrix .phase-cell{text-align:center;color:var(--c-dim)}
+  .phase-cell .now{color:var(--c-accent-2)}
+  .phase-cell .visited{color:var(--c-good)}
+  body.review .matrix tr.current th{background:rgba(45,212,238,.12);box-shadow:inset 3px 0 var(--c-accent-2)}
 </style>
 </head>
 <body>
@@ -307,17 +316,17 @@
 
     <section class="box">
       <h3>📊 Матрица трассируемости</h3>
-      <p class="hint">Собирается из DOM на лету и копится: требование закрыто, если элемент с его меткой хоть раз появился на экране. Чипы показывают, в каком состоянии.</p>
+      <p class="hint">Строки — требования, столбцы — состояния экрана. ● показывает требование на текущем экране, ✓ сохраняет отметку после перехода.</p>
       <div class="row" style="margin-bottom:14px">
         <button class="tool primary" id="walkBtn">▶ Обойти все состояния <kbd>W</kbd></button>
         <button class="tool" id="reviewBtn">🔍 Режим ревью <kbd>R</kbd></button>
         <button class="tool" id="resetBtn">↺ Сбросить покрытие</button>
       </div>
       <div class="progress"><div class="bar"><i id="bar"></i></div><div class="score" id="score">0 / 6</div></div>
-      <table class="matrix">
-        <thead><tr><th>ID</th><th class="what">Суть</th><th>Где встречено</th><th>Вердикт</th></tr></thead>
+      <div class="matrix-scroll"><table class="matrix" aria-label="Покрытие требований по состояниям экрана">
+        <thead><tr id="matrixHead"></tr></thead>
         <tbody id="matrixBody"></tbody>
-      </table>
+      </table></div>
       <div id="summary"></div>
     </section>
 
@@ -609,17 +618,19 @@
 
   /* матрица (дано): сканирует DOM по data-req и копит покрытие по состояниям */
   const REQUIREMENTS = [
-    {id:'ФТ-1', t:'Список по убыванию даты', k:'ft'},
-    {id:'ФТ-2', t:'Выделение непрочитанных + счётчик', k:'ft'},
-    {id:'НФТ-1', t:'Загрузка, ввод не блокируется', k:'nft'},
-    {id:'НФТ-2', t:'Офлайн: кэш + индикатор + retry', k:'nft'},
-    {id:'НФТ-3', t:'Ошибка + retry, данные не теряются', k:'nft'},
-    {id:'НФТ-4', t:'Пустое состояние + CTA', k:'nft'},
-    {id:'ФТ-3', t:'Бонус: детали + «прочитано»', k:'ft', bonus:true},
-    {id:'ФТ-4', t:'Бонус: «удалить»', k:'ft', bonus:true},
-    {id:'ФТ-5', t:'Бонус: фильтр категорий', k:'ft', bonus:true},
+    {id:'ФТ-1', t:'Лента по дате: тип, заголовок, текст и дата', k:'ft'},
+    {id:'ФТ-2', t:'Выделение и счётчик непрочитанных', k:'ft'},
+    {id:'НФТ-1', t:'Первичная загрузка до 1 с без блокировки ввода', k:'nft'},
+    {id:'НФТ-2', t:'Сохранённые уведомления, индикатор связи и повтор загрузки', k:'nft'},
+    {id:'НФТ-3', t:'Повтор после ошибки с сохранением списка', k:'nft'},
+    {id:'НФТ-4', t:'Объяснение пустого списка и действие', k:'nft'},
+    {id:'ФТ-3', t:'Открытие деталей и отметка о прочтении', k:'ft', bonus:true},
+    {id:'ФТ-4', t:'Удаление уведомления', k:'ft', bonus:true},
+    {id:'ФТ-5', t:'Фильтрация по категории', k:'ft', bonus:true},
   ];
-  const PHASE_RU = {list:'список', loading:'загрузка', error:'ошибка', offline:'офлайн', empty:'пусто', details:'детали'};
+  const PHASE_RU = {list:'Список', details:'Детали', loading:'Загрузка', offline:'Офлайн', error:'Ошибка сервера', empty:'Пустой список'};
+  $('#matrixHead').innerHTML = ['Требование', ...Object.values(PHASE_RU), 'Покрытие']
+    .map(label => `<th scope="col">${label}</th>`).join('');
   let phase = 'list';
   const seen = {};
   let lastDone = new Set();
@@ -644,21 +655,25 @@
       ids(el).forEach(id=>{ (seen[id] = seen[id] || new Set()).add(currentPhase); now.add(id); });
     });
     if(!content.children.length) content.innerHTML = `<div class="empty-hint">Состояние «${PHASE_RU[phase]}»: <code>${lastFn}()</code> пока ничего не рисует — допишите TODO</div>`;
-    drawMatrix(now);
+    drawMatrix(now, currentPhase);
   }
   let q = false;
   new MutationObserver(()=>{ if(q) return; q = true; requestAnimationFrame(()=>{ q=false; scan(); }); })
     .observe($('#screen'), {childList:true, subtree:true, attributes:true, attributeFilter:['class','data-req','hidden']});
 
-  function drawMatrix(now){
+  function drawMatrix(now, currentPhase){
     const core = REQUIREMENTS.filter(r=>!r.bonus);
     const done = new Set(core.filter(r=>seen[r.id]).map(r=>r.id));
     $('#matrixBody').innerHTML = REQUIREMENTS.map(r=>{
-      const where = seen[r.id] ? [...seen[r.id]].map(p=>`<span class="chip">${PHASE_RU[p]||p}</span>`).join('') : '';
-      const live = now && now.has(r.id) ? '<span class="chip now">на экране</span>' : '';
+      const cells = Object.entries(PHASE_RU).map(([key, label])=>{
+        const current = key === currentPhase && now.has(r.id);
+        const visited = seen[r.id]?.has(key);
+        const status = current ? 'На экране' : visited ? 'Встречено ранее' : 'Пока не встречено';
+        return `<td class="phase-cell" aria-label="${label}. ${status}" title="${status}"><span class="${current?'now':visited?'visited':''}">${current?'●':visited?'✓':'—'}</span></td>`;
+      }).join('');
       const v = seen[r.id] ? '<span class="v ok">✔ закрыто</span>' : (r.bonus ? '<span class="v bonus">бонус</span>' : '<span class="v miss">✖ нет метки</span>');
       const fl = seen[r.id] && !lastDone.has(r.id) ? 'flash' : '';
-      return `<tr class="${r.bonus?'bonus-row':''} ${now.has(r.id)?'current':''} ${fl}"><td><span class="rid ${r.k}">${r.id}</span></td><td class="what">${r.t}</td><td><div class="chips">${where}${live}${!where&&!live?'<span style="color:var(--c-dim)">—</span>':''}</div></td><td>${v}</td></tr>`;
+      return `<tr class="${r.bonus?'bonus-row':''} ${now.has(r.id)?'current':''} ${fl}"><th scope="row"><span class="rid ${r.k}">${r.id}</span> ${r.t}</th>${cells}<td>${v}</td></tr>`;
     }).join('');
     lastDone = new Set(Object.keys(seen));
     $('#score').textContent = `${done.size} / ${core.length}`;
