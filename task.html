@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Задание — Центр уведомлений</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="preload" as="style" onload="this.onload=null; this.rel='stylesheet'">
 <style>
 
   /* ===== Дизайн-система (НФТ-6): токены ===== */
@@ -271,14 +271,12 @@
       <div class="screen" id="screen" role="main" aria-label="Центр уведомлений">
         <div class="status"><span>9:41</span><span class="notch" aria-hidden="true"></span><span>5G ▮▮▮</span></div>
 
-        <!-- TODO (ФТ-2): добавьте data-req="ФТ-2" в шапку. Счётчик #badge уже есть — его значение обновляет renderList() -->
-        <div class="apphead">
+        <div class="apphead" data-req="ФТ-2">
           <h2>Уведомления</h2>
           <span class="badge" id="badge" role="status" aria-live="polite">0</span>
         </div>
 
-        <!-- TODO (бонус ФТ-5): фильтр уже работает — осталось добавить data-req="ФТ-5" -->
-        <div class="filter" role="tablist" aria-label="Фильтр категорий">
+        <div class="filter" role="tablist" aria-label="Фильтр категорий" data-req="ФТ-5">
           <button class="ftab" data-cat="all" role="tab" aria-selected="true">Все</button>
           <button class="ftab" data-cat="Финансовое" role="tab" aria-selected="false">Финансовые</button>
           <button class="ftab" data-cat="Системное" role="tab" aria-selected="false">Системные</button>
@@ -370,54 +368,209 @@
 
   /* НФТ-1: экран загрузки. Скелетон не должен блокировать ввод. */
   function renderLoading(){
-    // TODO: вывести 3–4 скелетона <div class="skel"></div> в content
-    //       и пометить хотя бы один из них data-req="НФТ-1"
+    content.innerHTML = `<div class="skel" data-req="НФТ-1" role="status" aria-label="Загрузка уведомлений"></div>
+      <div class="skel" aria-hidden="true"></div><div class="skel" aria-hidden="true"></div>`;
+  }
+
+  function updateBadge(items){
+    const count = items.filter(item => item.unread).length;
+    badge.textContent = String(count);
+    badge.classList.toggle('zero', count === 0);
+    badge.setAttribute('aria-label', 'Непрочитанных уведомлений: ' + count);
+  }
+
+  function appendState(requirement, title, description, buttonText, showAll = false){
+    const state = document.createElement('div');
+    state.className = 'state';
+    state.dataset.req = requirement;
+    state.innerHTML = `<div class="ttl"></div><p class="dsc"></p><button type="button" class="btn"></button>`;
+    state.querySelector('.ttl').textContent = title;
+    state.querySelector('.dsc').textContent = description;
+    const button = state.querySelector('button');
+    button.textContent = buttonText;
+    if(showAll){
+      button.addEventListener('click', () => document.querySelector('.ftab[data-cat="all"]').click());
+    } else {
+      button.dataset.retry = '';
+    }
+    content.append(state);
+  }
+
+  function appendCategoryEmpty(){
+    appendState('НФТ-4', 'В этой категории пока пусто', 'Уведомления других категорий можно посмотреть в общей ленте.', 'Показать все', true);
   }
 
   /* НФТ-4: пустое состояние с объяснением и CTA. */
   function renderEmpty(){
-    // TODO: <div class="state" data-req="…"> иконка + «Уведомлений нет» + пояснение + кнопка
+    const filtered = S.st === 'data' && S.items.length > 0;
+    updateBadge(filtered ? S.items : []);
+    if(filtered) return appendCategoryEmpty();
+    appendState('НФТ-4', 'Уведомлений нет', 'Здесь появятся сообщения об операциях и обновлениях приложения.', 'Обновить');
+    const icon = document.createElement('div');
+    icon.className = 'ic';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '✉';
+    content.querySelector('.state').prepend(icon);
+  }
+
+  function showCached(bannerClass, requirement, message){
+    const banner = document.createElement('div');
+    banner.className = 'banner ' + bannerClass;
+    banner.dataset.req = requirement;
+    banner.innerHTML = `<span></span><button type="button" class="link b-act" data-retry>Повторить</button>`;
+    banner.firstElementChild.textContent = message;
+    content.append(banner);
+    const filtered = applyFilter(S.cached);
+    if(filtered.length) appendCards(filtered);
+    else appendCategoryEmpty();
   }
 
   /* НФТ-3: ошибка сервера. Уже показанные данные не должны теряться. */
   function renderError(err){
-    // TODO: если в S.cached есть данные — баннер .banner.bad «Не удалось обновить» + retry + список;
-    //       иначе — экран .state «Не удалось загрузить» + кнопка retry.
-    //       err.message === 'offline' → текст «Нет соединения»
+    if(err.message === 'offline') return renderOffline();
+    updateBadge(S.cached);
+    if(S.cached.length){
+      showCached('bad', 'НФТ-3', 'Не удалось обновить. Показаны сохранённые уведомления.');
+    } else {
+      appendState('НФТ-3', 'Не удалось загрузить уведомления', 'Попробуйте загрузить сообщения ещё раз.', 'Повторить');
+    }
   }
 
   /* НФТ-2: офлайн. Показать КЭШ (S.cached) + баннер + retry. */
   function renderOffline(){
-    // TODO: баннер .banner.warn «Нет соединения · показаны сохранённые данные»
-    //       + список из applyFilter(S.cached) + кнопка retry
+    updateBadge(S.cached);
+    if(S.cached.length){
+      showCached('warn', 'НФТ-2', 'Нет соединения. Показаны сохранённые уведомления.');
+    } else {
+      appendState('НФТ-2', 'Нет соединения', 'Сохранённых уведомлений пока нет. Проверьте подключение и повторите попытку.', 'Повторить');
+    }
+  }
+
+  // Обновляем имитацию сервера и обе локальные копии, в том числе в офлайне.
+  function updateNotification(id, action){
+    for(const list of new Set([BFF, S.items, S.cached])){
+      const index = list.findIndex(item => item.id === id);
+      if(index < 0) continue;
+      if(action === 'delete') list.splice(index, 1);
+      else list[index].unread = false;
+    }
+    render();
+  }
+
+  function showDetails(item, trigger){
+    const sheet = document.createElement('div');
+    sheet.className = 'sheet open';
+    sheet.dataset.req = 'ФТ-3';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-labelledby', 'd-title');
+    sheet.setAttribute('aria-describedby', 'd-desc');
+    sheet.innerHTML = `
+      <div class="sheet-body">
+        <div class="grab" aria-hidden="true"></div>
+        <div class="sheet-head"><span class="cat"></span>
+          <button class="icon-btn" type="button" aria-label="Закрыть детали">×</button></div>
+        <h3 id="d-title"></h3><p id="d-desc"></p><p id="d-date"></p>
+        <span class="read-mark">✓ Прочитано</span>
+      </div>`;
+    sheet.querySelector('.cat').textContent = item.type;
+    sheet.querySelector('#d-title').textContent = item.title;
+    sheet.querySelector('#d-desc').textContent = item.desc;
+    sheet.querySelector('#d-date').textContent = item.date;
+    const closeButton = sheet.querySelector('button');
+    function close(){
+      sheet.remove();
+      trigger?.focus();
+    }
+    closeButton.addEventListener('click', close);
+    sheet.addEventListener('click', event => { if(event.target === sheet) close(); });
+    sheet.addEventListener('keydown', event => {
+      if(event.key === 'Escape') close();
+      if(event.key === 'Tab') event.preventDefault(); // Единственная кнопка диалога.
+      event.stopPropagation();
+    });
+    content.append(sheet);
+    closeButton.focus();
+  }
+
+  function appendCards(list){
+    const sorted = [...list].sort((a, b) => b.ts.localeCompare(a.ts));
+    sorted.forEach((item, index) => {
+      const card = document.createElement('article');
+      card.className = item.unread ? 'card unread' : 'card read';
+      card.dataset.req = item.unread ? 'ФТ-1 ФТ-2' : 'ФТ-1';
+      card.innerHTML = `
+        <button type="button" class="card-main" data-req="ФТ-3" aria-haspopup="dialog">
+          <span class="meta"><span class="cat"></span></span>
+          <span class="title" style="display:block"></span>
+          <span class="desc" style="display:block"></span>
+          <time class="date" style="display:block"></time>
+        </button>
+        <button type="button" class="del" data-req="ФТ-4">Удалить</button>`;
+      const category = card.querySelector('.cat');
+      category.textContent = item.type;
+      category.classList.toggle('sys', item.type === 'Системное');
+      if(item.unread){
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.setAttribute('role', 'img');
+        dot.setAttribute('aria-label', 'Непрочитано');
+        card.querySelector('.meta').append(dot);
+      }
+      card.querySelector('.title').textContent = item.title;
+      card.querySelector('.desc').textContent = item.desc;
+      const date = card.querySelector('.date');
+      date.dateTime = item.ts;
+      date.textContent = item.date;
+      card.querySelector('.card-main').addEventListener('click', () => {
+        updateNotification(item.id, 'read');
+        showDetails(item, content.querySelectorAll('.card-main')[index]);
+      });
+      const removeButton = card.querySelector('.del');
+      removeButton.setAttribute('aria-label', 'Удалить уведомление «' + item.title + '»');
+      removeButton.addEventListener('click', () => {
+        updateNotification(item.id, 'delete');
+        const remaining = content.querySelectorAll('.card-main');
+        const next = remaining[Math.min(index, remaining.length - 1)] || content.querySelector('button');
+        next?.focus();
+        toast('Уведомление удалено');
+      });
+      content.append(card);
+    });
   }
 
   /* ФТ-1 + ФТ-2: список и счётчик непрочитанных. */
   function renderList(){
-    // TODO: badge.textContent = число непрочитанных в S.items;
-    //       отрисовать applyFilter(S.items) карточками .card с data-req="ФТ-1";
-    //       непрочитанные — класс .unread и data-req="ФТ-1 ФТ-2";
-    //       пустой список → renderEmpty()
+    const filtered = applyFilter(S.items);
+    if(!filtered.length) return renderEmpty();
+    updateBadge(S.items);
+    appendCards(filtered);
   }
 
   /* ==================================================================
      Готовая логика — не редактируйте ниже без необходимости
      ================================================================== */
 
+  // Только ответ текущего запроса может менять список и кэш.
+  let pendingRequest = null;
   function load(){
     renderLoading();
-    transport.fetch().then(items=>{
+    const request = transport.fetch();
+    pendingRequest = request;
+    request.then(items=>{
+      if(request !== pendingRequest) return;
+      pendingRequest = null;
       S.items = items; if(items.length) S.cached = items;
       render();
-    }).catch(err=>{
-      /* S.items не очищаем: при ошибке данные не должны теряться (НФТ-3) */
-      if(err.message==='offline' && S.cached.length) renderOffline();
-      else renderError(err);
+    }, err=>{
+      if(request !== pendingRequest) return;
+      pendingRequest = null;
+      renderError(err);
     });
   }
   function retry(){ S.st='data'; syncPanel(); load(); }
   function render(){
-    if(S.st==='loading') return renderLoading();
+    if(pendingRequest || S.st==='loading') return renderLoading();
     if(S.st==='empty')   return renderEmpty();
     if(S.st==='error')   return renderError(new Error('500'));
     if(S.st==='offline') return renderOffline();
@@ -430,7 +583,12 @@
 
   /* переключатели состояний (панель) */
   function syncPanel(){ document.querySelectorAll('#stateBtns .sbtn').forEach(x=>x.classList.toggle('on', x.dataset.st===S.st)); }
-  function setState(st){ S.st = st; syncPanel(); if(st==='loading') renderLoading(); else load(); }
+  function setState(st){
+    pendingRequest = null;
+    S.st = st;
+    syncPanel();
+    if(st==='loading') renderLoading(); else load();
+  }
   document.querySelectorAll('#stateBtns .sbtn').forEach(b=>b.addEventListener('click',()=>setState(b.dataset.st)));
 
   /* фильтр (ФТ-5) */
